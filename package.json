@@ -1,0 +1,35 @@
+{
+  "name": "giroweb-parser",
+  "version": "1.0.0",
+  "description": "A OpenMensa Parser for GiroWeb",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "ts-node-dev src/index.ts --transpileOnly",
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JonatanMGit/OpenMensa-Parser.git"
+  },
+  "keywords": [
+    "Openmensa",
+    "GiroWeb"
+  ],
+  "author": "Jonatan_M",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/JonatanMGit/OpenMensa-Parser/issues"
+  },
+  "homepage": "https://github.com/JonatanMGit/OpenMensa-Parser#readme",
+  "devDependencies": {
+    "@types/cheerio": "^0.22.31",
+    "@types/node": "^17.0.35",
+    "ts-node-dev": "^1.1.8"
+  },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "cheerio": "^1.0.0-rc.11",
+    "typescript": "^4.7.2"
+  }
+}

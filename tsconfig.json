@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ESNext",
+    "removeComments": true,
+    "allowSyntheticDefaultImports": true,
+    "allowJs": true,
+    "baseUrl": "src",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "downlevelIteration": true,
+    "paths": {
+      "*": ["src/*"]
+    },
+    "lib": ["esnext", "DOM"],
+    "sourceMap": true,
+    "noImplicitAny": false,
+    "typeRoots": ["node_modules/@types"]
+  },
+  "exclude": ["node_modules", "build"],
+  "include": ["./src"]
+}
