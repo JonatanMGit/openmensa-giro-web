@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import json
 from datetime import date, timedelta
 from pyopenmensa.feed import LazyBuilder
+import re
+import os
 
 requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'  # Giroweb does not support good ciphers :(
 
@@ -10,25 +12,26 @@ requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'  # Gir
 USERNAME = ""
 PASSWORD = ""
 
-# Base URL of the Mensa website (https://https://example.giro-web.de/index.php/index.php)
+# Base URL of the Mensa website (https://example.giro-web.de/index.php)
 BASE_URL = ""
 
-# Week to fetch (0 for current, 1 for next, etc.)
+# Week to fetch (0 for current, 1 for next, etc. incase your mensa provides more weeks)
 TARGET_WEEKS = [0, 1]  
 
+# Session to reuse connection
+session = requests.Session()
 
-def get_initial_cookies_and_form_data(base_url):
-    """Gets initial cookies, logidpost, and proc from the initial page load."""
-    response = requests.get(base_url, verify=False)
+def get_initial_data(base_url):
+    """Gets initial cookies, logidpost, and proc."""
+    print("Fetching initial data...")
+    response = session.get(base_url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Extract form data
     form = soup.find('form', id='loginform')
     proc = form.find('input', {'name': 'proc'})['value']
     logidpost = form.find('input', {'name': 'logidpost'})['value']
 
     return response.cookies, proc, logidpost
-
 
 def login(base_url, username, password, cookies, proc, logidpost):
     """Logs in to the Mensa website."""
@@ -38,89 +41,75 @@ def login(base_url, username, password, cookies, proc, logidpost):
         'loginname': username,
         'loginpass': password
     }
+    print("Logging in...")
+    session.post(base_url, data=login_data, cookies=cookies)
 
-    response = requests.post(base_url, data=login_data, cookies=cookies, verify=False)
-    return response
-
-
-def fetch_mensa_plan(base_url, cookies, target_week):
+def fetch_mensa_plan(target_week):
     """Fetches the Mensa plan for the specified week."""
     data = {
         'wochenwahl': target_week,
-        'sid': '1000000041',  # Assuming this is static for now, changes depending on who you are (user, class, something else)
-        'btun': '',
-        'btup': '',
-        'cardnum': ''
+        'sid': '1000000041' # Assuming this is static for now, changes depending on who you are (user, class, something else, or maybe entirely different for other Mensas)
     }
-
-    response = requests.post(base_url, data=data, cookies=cookies, verify=False)
-    return response
-
+    print(f"Fetching Mensa plan for week {target_week}...")
+    return session.post(BASE_URL, data=data)
 
 def create_openmensa_feed(gwdata_json_list):
-    """Creates a single OpenMensa feed from 'gwdata' JSON for multiple weeks."""
+    """Creates a single OpenMensa feed."""
     canteen = LazyBuilder()
-    
     school_id = gwdata_json_list[0]["ersteller"]["schulenid"] 
+    personen_id = gwdata_json_list[0]["ersteller"]["personenid"]  # Get the personenID
 
-    # Loop through the list of gwdata_json for each week
-    for gwdata_json in gwdata_json_list:
-        # Extract the base date from the 'zeiten' section and convert it to YYYY-MM-DD format
-        date_parts = gwdata_json["zeiten"]["datumwahl"].split('.')
-        base_date = date(int(date_parts[2]), int(date_parts[1]), int(date_parts[0]))
+    for i, gwdata_json in enumerate(gwdata_json_list):
+        today = date.today()
+        this_monday = today - timedelta(days=today.weekday())
+        target_monday = this_monday + timedelta(weeks=i) 
 
-        first_day_of_week = base_date - timedelta(days=base_date.weekday())
-
-        # Loop through the weekdays (Mon-Fri)
         for day_num in range(5):
-            day = first_day_of_week + timedelta(days=day_num)
+            day = target_monday + timedelta(days=day_num)
             day_str = day.strftime("%d.%m.%Y")
 
-            # Loop through the menus for each day
             for menu_num in range(1, 4):
-                menu_data = gwdata_json["personenliste"]["10744"]["menueplan"][school_id][str(menu_num)]
+                menu_data = gwdata_json["personenliste"][personen_id]["menueplan"][school_id][str(menu_num)].get(day_str)
 
-                # Check if the date exists within the 'menueplan' data
-                if day_str in menu_data:
-                    menu_data = menu_data[day_str]
+                if menu_data and menu_data["menueplanid"] is not None:
+                    # Remove allergy squares and extra spaces from the meal name
+                    meal_name = " ".join([line.strip() for line in menu_data["zeilen"] if line])
+                    meal_name = re.sub(r'\[.*?\]', '', meal_name)
+                    meal_name = ' '.join(meal_name.split())  # Remove extra spaces 
+                    
+                    notes = [gwdata_json["zusatzstoffe"][str(zusatzstoff_id)] for zusatzstoff_id in menu_data["zusatzstoffeids"]]
+                    prices = {'student': menu_data["preislistenpreis_ggf_subventioniert"]}
 
-                    if menu_data["menueplanid"] is not None:
-                        # Combine the meal lines into a single string, ensuring proper encoding
-                        meal_name = " ".join([line.strip() for line in menu_data["zeilen"] if line is not None])
-                        meal_name = meal_name.replace("  ", " ")  # Remove double spaces
-                        meal_name = meal_name.strip()  # Remove leading/trailing spaces
-                        category = "Hauptgericht"  # Assuming all meals are main courses
-                        notes = [gwdata_json["zusatzstoffe"][str(zusatzstoff_id)] for zusatzstoff_id in menu_data["zusatzstoffeids"]]
-                        prices = {'student': menu_data["preislistenpreis_ggf_subventioniert"]}  # Price in Euros now
-
-                        canteen.addMeal(day, category, meal_name, notes=notes, prices=prices, roles=['student'])
+                    canteen.addMeal(day, "Hauptgericht", meal_name, notes=notes, prices=prices, roles=['student'])
 
     return canteen.toXMLFeed()
 
 if __name__ == "__main__":
-    # Get initial cookies and form data
-    cookies, proc, logidpost = get_initial_cookies_and_form_data(BASE_URL)
+    cookies, proc, logidpost = get_initial_data(BASE_URL)
+    login(BASE_URL, USERNAME, PASSWORD, cookies, proc, logidpost)
 
-    login_response = login(BASE_URL, USERNAME, PASSWORD, cookies, proc, logidpost)
-
-    # Fetch Mensa plans for multiple weeks
     gwdata_json_list = []
     for target_week in TARGET_WEEKS:
-        # Fetch Mensa plan
-        mensa_plan_response = fetch_mensa_plan(BASE_URL, login_response.cookies, target_week)
-        
-        soup = BeautifulSoup(mensa_plan_response.text, 'html.parser')
+        response = fetch_mensa_plan(target_week)
+        soup = BeautifulSoup(response.text, 'html.parser')
         gwdata_input = soup.find('input', {'id': 'gwdata'})
 
         if gwdata_input:
-            gwdata_json = json.loads(gwdata_input['value'])
-            gwdata_json_list.append(gwdata_json)
+            gwdata_json_list.append(json.loads(gwdata_input['value']))
         else:
-            print(f"Couldn't find the 'gwdata' element for week {target_week}.  Mensa plan might not be available.")
+            print(f"No 'gwdata' found for week {target_week}.")
 
-    # Create a single feed combining both weeks
+    print("Creating OpenMensa feed...")
     openmensa_feed = create_openmensa_feed(gwdata_json_list)
 
-    print(openmensa_feed)
-    with open('mensa.xml', 'w', encoding='utf-8') as f:
+    # Create the output folder if it doesn't exist
+    output_folder = "output"
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    output_file_path = os.path.join(output_folder, "mensa.xml")  
+
+    print(f"Saving OpenMensa feed to '{output_file_path}'...")
+    with open(output_file_path, 'w', encoding='utf-8') as f:
         f.write(openmensa_feed)
+    print("Done!")
