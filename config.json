@@ -1,0 +1,10 @@
+{
+    "USERNAME": "example_username",
+    "PASSWORD": "example_password",
+    "BASE_URL": "https://example.com/index.php",
+    "TARGET_WEEKS": [
+        0,
+        1,
+        2
+    ]
+}
